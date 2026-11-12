@@ -122,8 +122,8 @@ class AgentController {
     private List<Goal> goalsFor(long owner,String token){
         var result=new ArrayList<Goal>();
         for(var g:legacy.get("/api/v1/saving-goals?userId={id}",token,owner))
-            if(g.path("ownerId").asLong()==owner && "INDIVIDUAL".equalsIgnoreCase(g.path("ownerType").asText()) &&
-                "PEN".equalsIgnoreCase(g.path("currencyCode").asText()) && (g.path("completedAt").isNull() || g.path("completedAt").isMissingNode()) &&
+            if(g.path("actorUserId").asLong()==owner && "INDIVIDUAL".equalsIgnoreCase(g.path("ownerType").asText()) &&
+                "PEN".equalsIgnoreCase(g.path("currencyCode").asText()) && "INPROGRESS".equals(g.path("status").asText()) &&
                 g.path("id").asLong()>0){
                 String title=g.path("title").asText();
                 if(!title.isBlank()) result.add(new Goal(g.path("id").asLong(),title.substring(0,Math.min(200,title.length()))));
