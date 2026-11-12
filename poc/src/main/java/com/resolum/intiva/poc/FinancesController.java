@@ -65,7 +65,7 @@ class FinancesController {
         if(total.compareTo(budget.limit())<0)return;
         var id=java.util.UUID.nameUUIDFromBytes(("budget:"+budget.planId()).getBytes(StandardCharsets.UTF_8));
         var alert=new BudgetAlert("BUDGET_ALERT",id,budget.planId(),e.ownerId(),
-            "Llegaste al límite de "+budget.label()+" (S/ "+total+"). Revisa tu plan.");
+            "Llegaste al lÃ­mite de "+budget.label()+" (S/ "+total+"). Revisa tu plan.");
         db.update("insert into budget_alert_outbox(event_id,payload) values(?,?) on conflict(event_id) do nothing",
             id,json.writeValueAsString(alert));
     }
