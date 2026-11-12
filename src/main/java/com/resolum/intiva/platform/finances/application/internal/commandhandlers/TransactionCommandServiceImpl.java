@@ -145,6 +145,13 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                 ));
             }
 
+            if(command.transactionType()==TransactionTypes.EXPENSE && command.ownerTypes()==OwnerTypes.INDIVIDUAL &&
+                    "PEN".equalsIgnoreCase(command.amount().getCurrencyCode())){
+                var at=savedTransaction.getOccurredAt()==null?savedTransaction.getCreatedAt():savedTransaction.getOccurredAt();
+                eventPublisher.publishEvent(new PlanExpenseBridge.Expense(savedTransaction.getId(),command.ownerId(),
+                        java.time.YearMonth.from(at.atZone(java.time.ZoneId.of("America/Lima"))).toString(),
+                        command.categoryId().getValue(),command.amount().getAmount()));
+            }
             return Optional.of(savedTransaction);
         } catch (RuntimeException e) {
             if (e instanceof InsufficientFundsException) {

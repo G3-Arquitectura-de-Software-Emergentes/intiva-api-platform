@@ -31,10 +31,13 @@ class LimitOutboxPublisher {
     @Scheduled(fixedDelay=3000)
     @Transactional
     public void publish() throws Exception {
-        var events=db.query("""
-            select event_id,payload from limit_outbox where sent_at is null
-            order by created_at limit 1 for update skip locked
-            """,(rs,i)->new Event(rs.getObject(1,UUID.class),rs.getString(2)));
+        publishPending("limit_outbox");
+        publishPending("budget_alert_outbox");
+    }
+    private void publishPending(String table) throws Exception {
+        var events=db.query("select event_id,payload from "+table+" where sent_at is null "+
+            "order by created_at limit 1 for update skip locked",
+            (rs,i)->new Event(rs.getObject(1,UUID.class),rs.getString(2)));
         for(var e:events){
             var correlation=new CorrelationData(e.id().toString());
             var message=MessageBuilder.withBody(e.payload().getBytes(StandardCharsets.UTF_8))
@@ -43,7 +46,7 @@ class LimitOutboxPublisher {
             broker.send(PlanEvents.EXCHANGE,PlanEvents.KEY,message,correlation);
             if(!correlation.getFuture().get(5,TimeUnit.SECONDS).isAck() || correlation.getReturned()!=null)
                 throw new IllegalStateException("Limit event was not routed; outbox will retry");
-            db.update("update limit_outbox set sent_at=now() where event_id=?",e.id());
+            db.update("update "+table+" set sent_at=now() where event_id=?",e.id());
         }
     }
 }

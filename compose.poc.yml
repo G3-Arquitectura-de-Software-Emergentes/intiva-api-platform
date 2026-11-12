@@ -6,6 +6,8 @@ x-poc: &poc
 x-common: &common
   LEGACY_URL: http://legacy:8080
   FINANCES_URL: http://finances:8080
+  SAVINGS_URL: http://savings:8080
+  COMMUNICATIONS_URL: http://communications:8080
   SPRING_RABBITMQ_HOST: rabbitmq
   SPRING_RABBITMQ_USERNAME: intiva
   SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
@@ -19,6 +21,7 @@ services:
       AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
       FINANCES_DB_PASSWORD: ${FINANCES_DB_PASSWORD:?Set FINANCES_DB_PASSWORD}
       COMMUNICATIONS_DB_PASSWORD: ${COMMUNICATIONS_DB_PASSWORD:?Set COMMUNICATIONS_DB_PASSWORD}
+      SAVINGS_DB_PASSWORD: ${SAVINGS_DB_PASSWORD:?Set SAVINGS_DB_PASSWORD}
       LEGACY_DB_PASSWORD: ${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}
     volumes:
       - poc_pg:/var/lib/postgresql/data
@@ -59,6 +62,9 @@ services:
       SPRING_DATA_REDIS_PASSWORD: ""
       AUTHORIZATION_JWT_SECRET: ${LEGACY_JWT_SECRET:?Set LEGACY_JWT_SECRET}
       INTEGRATIONS_FCM_ENABLED: "false"
+      INTIVA_PLAN_TRACKING_ENABLED: "true"
+      INTIVA_PLAN_TRACKING_FINANCES_URL: http://finances:8080
+      INTIVA_PLAN_TRACKING_SERVICE_KEY: ${INTIVA_SERVICE_KEY:?Set INTIVA_SERVICE_KEY}
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
@@ -77,6 +83,7 @@ services:
       postgres: {condition: service_healthy}
       legacy: {condition: service_started}
       finances: {condition: service_started}
+      savings: {condition: service_started}
   finances:
     <<: *poc
     environment:
@@ -94,12 +101,23 @@ services:
     environment:
       <<: *common
       SPRING_PROFILES_ACTIVE: communications
+      INTIVA_SERVICE_KEY: ${INTIVA_SERVICE_KEY:?Set INTIVA_SERVICE_KEY}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/communications_db
       SPRING_DATASOURCE_USERNAME: communications
       SPRING_DATASOURCE_PASSWORD: ${COMMUNICATIONS_DB_PASSWORD:?Set COMMUNICATIONS_DB_PASSWORD}
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
+  savings:
+    <<: *poc
+    environment:
+      SPRING_PROFILES_ACTIVE: savings
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/savings_db
+      SPRING_DATASOURCE_USERNAME: savings
+      SPRING_DATASOURCE_PASSWORD: ${SAVINGS_DB_PASSWORD:?Set SAVINGS_DB_PASSWORD}
+      INTIVA_SERVICE_KEY: ${INTIVA_SERVICE_KEY:?Set INTIVA_SERVICE_KEY}
+    depends_on:
+      postgres: {condition: service_healthy}
   gateway:
     <<: *poc
     environment:

@@ -16,6 +16,7 @@ class GatewayRoutes {
         return route("agent").route(RequestPredicates.path("/api/v1/monthly-plans")
                 .or(RequestPredicates.path("/api/v1/monthly-plans/**"))
                 .or(RequestPredicates.path("/api/v1/category-suggestions"))
+                .or(RequestPredicates.path("/api/v1/planning-goals"))
                 .or(RequestPredicates.path("/api/v1/financial-insights")), http(agent)).build()
             .and(route("plan-notifications").route(RequestPredicates.path("/api/v1/plan-notifications"),
                     http(communications)).build())

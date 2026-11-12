@@ -18,3 +18,4 @@ intiva:
   finances: ${FINANCES_URL:http://localhost:8083}
   communications: ${COMMUNICATIONS_URL:http://localhost:8084}
   service-key: ${INTIVA_SERVICE_KEY:}
+  savings: ${SAVINGS_URL:http://localhost:8085}

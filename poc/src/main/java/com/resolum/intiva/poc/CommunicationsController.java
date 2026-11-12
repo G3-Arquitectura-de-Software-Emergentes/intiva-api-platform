@@ -21,14 +21,23 @@ class CommunicationsController {
     }
     @RabbitListener(queues=PlanEvents.QUEUE)
     public void consume(Message message){
-        PlanLimit event;
-        try {event=json.readValue(message.getBody(),PlanLimit.class);}
-        catch(java.io.IOException e){throw new AmqpRejectAndDontRequeueException("Invalid limit event",e);}
+        try {
+            var node=json.readTree(message.getBody());
+            if("BUDGET_ALERT".equals(node.path("kind").asText())){
+                var alert=json.treeToValue(node,FinancesController.BudgetAlert.class);
+                addNotice(alert.eventId(),alert.planId(),alert.ownerId(),alert.message());
+            } else {
+                var event=json.treeToValue(node,PlanLimit.class);
+                addNotice(event.eventId(),event.planId(),event.ownerId(),
+                    "Límite de "+event.categoryLabel()+" aplicado: S/ "+event.amount());
+            }
+        } catch(java.io.IOException e){throw new AmqpRejectAndDontRequeueException("Invalid plan event",e);}
+    }
+    private void addNotice(UUID event,UUID plan,long owner,String message){
         db.update("""
             insert into plan_notices(event_id,plan_id,owner_id,message)
             values(?,?,?,?) on conflict (event_id) do nothing
-            """,event.eventId(),event.planId(),event.ownerId(),
-            "Límite de "+event.categoryLabel()+" aplicado: S/ "+event.amount());
+            """,event,plan,owner,message);
     }
     record Notice(UUID id,UUID planId,String message){}
     @GetMapping("/api/v1/plan-notifications")

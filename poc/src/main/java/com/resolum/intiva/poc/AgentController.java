@@ -21,6 +21,15 @@ class AgentController {
     private final GeminiPlanner ai;
     private final RestClient finances;
     private final String key;
+    private RestClient savings;
+    private RestClient communications;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureExtras(@Value("${intiva.savings}") String savingsUrl,
+                         @Value("${intiva.communications}") String communicationsUrl){
+        savings=LegacyClient.client(savingsUrl);
+        communications=LegacyClient.client(communicationsUrl);
+    }
 
     AgentController(JdbcTemplate db, LegacyClient legacy, GeminiPlanner ai,
                     @Value("${intiva.finances}") String url,@Value("${intiva.service-key}") String key) {
@@ -30,16 +39,32 @@ class AgentController {
     record SuggestionRequest(String description,BigDecimal amount,String currency){}
     record Suggestion(String status,Long categoryId,String label){}
     record Generate(String month){}
-    record Update(int version,BigDecimal proposedLimit){}
+    record Update(int version,BigDecimal proposedLimit,Long goalId,BigDecimal contribution,
+                  LocalDate reminderDate,String reminderLabel) {
+        Update(int version,BigDecimal proposedLimit){this(version,proposedLimit,null,null,null,null);}
+    }
+    record Goal(long id,String label){}
     record Approval(int version){}
     record Action(String id,String type,long categoryId,String label,BigDecimal currentLimit,BigDecimal projectedExpense,
                   BigDecimal proposedLimit,String currency,String status){}
     record View(UUID id,int version,String month,String status,String explanation,List<Action> actions){}
     record Plan(UUID id,long owner,String month,int version,String status,long categoryId,String label,
-                BigDecimal projected,BigDecimal proposed,BigDecimal previous,String explanation,UUID eventId){
-        View view(){return new View(id,version,month,status,explanation,List.of(new Action("limit","SPENDING_LIMIT",
-            categoryId,label,previous,projected,proposed,"PEN",switch(status){
-                case "ACTIVE"->"APPLIED";case "FAILED"->"FAILED";case "APPLYING"->"PENDING";default->"PROPOSED";})));}
+                BigDecimal projected,BigDecimal proposed,BigDecimal previous,String explanation,UUID eventId,
+                Long goalId,String goalLabel,BigDecimal contribution,LocalDate reminderDate,String reminderLabel,
+                boolean limitApplied,boolean contributionApplied,boolean reminderApplied){
+        private String progress(boolean applied){
+            return applied || status.equals("ACTIVE")?"APPLIED":switch(status){
+                case "FAILED","APPLYING"->"PENDING";default->"PROPOSED";};
+        }
+        View view(){
+            var actions=new ArrayList<Action>();
+            actions.add(new Action("limit","SPENDING_LIMIT",categoryId,label,previous,projected,proposed,"PEN",progress(limitApplied)));
+            if(goalId!=null)actions.add(new Action("contribution","PLANNED_CONTRIBUTION",goalId,goalLabel,null,null,
+                contribution,"PEN",progress(contributionApplied)));
+            if(reminderDate!=null)actions.add(new Action("reminder","PAYMENT_REMINDER",0,reminderDate+" · "+reminderLabel,
+                null,null,null,"PEN",progress(reminderApplied)));
+            return new View(id,version,month,status,explanation,actions);
+        }
     }
     record Expense(YearMonth month,long category,BigDecimal amount){}
     record Insights(String period, int smallExpenseCount, BigDecimal smallExpenseTotal, String note){}
@@ -90,13 +115,37 @@ class AgentController {
     }
     @GetMapping("/monthly-plans/{id}")
     View get(@RequestHeader("Authorization") String token,@PathVariable UUID id){return load(id,legacy.owner(token)).view();}
+    @GetMapping("/planning-goals")
+    List<Goal> goals(@RequestHeader("Authorization") String token){
+        return goalsFor(legacy.owner(token),token);
+    }
+    private List<Goal> goalsFor(long owner,String token){
+        var result=new ArrayList<Goal>();
+        for(var g:legacy.get("/api/v1/saving-goals?userId={id}",token,owner))
+            if(g.path("ownerId").asLong()==owner && "INDIVIDUAL".equalsIgnoreCase(g.path("ownerType").asText()) &&
+                "PEN".equalsIgnoreCase(g.path("currencyCode").asText()) && (g.path("completedAt").isNull() || g.path("completedAt").isMissingNode()) &&
+                g.path("id").asLong()>0){
+                String title=g.path("title").asText();
+                if(!title.isBlank()) result.add(new Goal(g.path("id").asLong(),title.substring(0,Math.min(200,title.length()))));
+            }
+        return result;
+    }
     @PatchMapping("/monthly-plans/{id}")
     View edit(@RequestHeader("Authorization") String token,@PathVariable UUID id,@RequestBody Update req){
-        long owner=legacy.owner(token); load(id,owner);
+        long owner=legacy.owner(token); var plan=load(id,owner);
         if(!validAmount(req.proposedLimit()))throw invalid("El lÃ­mite debe ser positivo y tener hasta dos decimales.");
+        if((req.goalId()==null)!=(req.contribution()==null) || req.contribution()!=null && !validAmount(req.contribution()))
+            throw invalid("Elige una meta y un aporte válido.");
+        String goalLabel=req.goalId()==null?null:goalsFor(owner,token).stream()
+            .filter(g->g.id()==req.goalId()).findFirst().orElseThrow(()->invalid("Meta no disponible.")).label();
+        String label=req.reminderLabel()==null?null:req.reminderLabel().strip();
+        if((req.reminderDate()==null)!=(label==null) || label!=null &&
+            (label.isBlank() || label.length()>120 || !YearMonth.from(req.reminderDate()).toString().equals(plan.month())))
+            throw invalid("Indica un recordatorio dentro del mes del plan.");
         int changed=db.update("""
-            update monthly_plans set proposed=?,version=version+1 where id=? and owner_id=? and version=? and status='DRAFT'
-            """,req.proposedLimit(),id,owner,req.version());
+            update monthly_plans set proposed=?,goal_id=?,goal_label=?,contribution=?,reminder_date=?,reminder_label=?,version=version+1
+            where id=? and owner_id=? and version=? and status='DRAFT'
+            """,req.proposedLimit(),req.goalId(),goalLabel,req.contribution(),req.reminderDate(),label,id,owner,req.version());
         if(changed==0) throw conflict();
         return load(id,owner).view();
     }
@@ -113,12 +162,19 @@ class AgentController {
         if(plan.status().equals("ACTIVE")) return plan.view();
         if(!plan.status().equals("APPLYING")) throw conflict();
         try {
-            var command=new PlanLimit(plan.eventId(),plan.id(),plan.version(),owner,plan.month(),plan.categoryId(),
-                    plan.label(),plan.proposed());
-            var response=finances.post().uri("/internal/plan-limits").header("X-Intiva-Service-Key",key)
-                    .body(command).retrieve().body(JsonNode.class);
-            if(response==null || !"APPLIED".equals(response.path("status").asText()))
-                throw new IllegalStateException("Finances did not confirm the write");
+            if(!plan.limitApplied()){
+                apply(finances,"/internal/plan-limits",new PlanLimit(plan.eventId(),plan.id(),plan.version(),owner,plan.month(),
+                    plan.categoryId(),plan.label(),plan.proposed()));
+                db.update("update monthly_plans set limit_applied=true where id=?",id);
+            }
+            if(plan.goalId()!=null && !plan.contributionApplied()){
+                apply(savings,"/internal/planned-contributions",new PlanExtras.Contribution(id,owner,plan.goalId(),plan.month(),plan.contribution()));
+                db.update("update monthly_plans set contribution_applied=true where id=?",id);
+            }
+            if(plan.reminderDate()!=null && !plan.reminderApplied()){
+                apply(communications,"/internal/plan-reminders",new PlanExtras.Reminder(id,owner,plan.reminderDate(),plan.reminderLabel()));
+                db.update("update monthly_plans set reminder_applied=true where id=?",id);
+            }
         } catch(RuntimeException e) {
             db.update("update monthly_plans set status='FAILED' where id=? and owner_id=? and version=? and status='APPLYING'",
                 id,owner,req.version());
@@ -127,6 +183,12 @@ class AgentController {
         db.update("update monthly_plans set status='ACTIVE' where id=? and owner_id=? and version=? and status in ('APPLYING','FAILED')",
             id,owner,req.version());
         return load(id,owner).view();
+    }
+    private void apply(RestClient target,String path,Object command){
+        var response=target.post().uri(path).header("X-Intiva-Service-Key",key)
+            .body(command).retrieve().body(JsonNode.class);
+        if(response==null || !"APPLIED".equals(response.path("status").asText()))
+            throw new IllegalStateException("Action was not confirmed");
     }
     private BigDecimal currentLimit(long owner,String month,long category) {
         try {
@@ -156,7 +218,9 @@ class AgentController {
             """,(rs,i)->new Plan(rs.getObject("id",UUID.class),owner,rs.getString("month"),rs.getInt("version"),
                 rs.getString("status"),rs.getLong("category_id"),rs.getString("label"),rs.getBigDecimal("projected"),
                 rs.getBigDecimal("proposed"),rs.getBigDecimal("previous"),rs.getString("explanation"),
-                rs.getObject("event_id",UUID.class)),id,owner)
+                rs.getObject("event_id",UUID.class),rs.getObject("goal_id",Long.class),rs.getString("goal_label"),
+                rs.getBigDecimal("contribution"),rs.getObject("reminder_date",LocalDate.class),rs.getString("reminder_label"),
+                rs.getBoolean("limit_applied"),rs.getBoolean("contribution_applied"),rs.getBoolean("reminder_applied")),id,owner)
             .stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
     static boolean validAmount(BigDecimal v){return v!=null && v.signum()>0 && v.scale()<=2 && v.compareTo(new BigDecimal("10000000"))<0;}
