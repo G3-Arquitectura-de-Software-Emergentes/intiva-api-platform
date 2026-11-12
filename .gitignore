@@ -39,3 +39,8 @@ build/
 # Firebase Json
 src/main/resources/firebase/*.json
 firebase-service-account.json
+
+/poc/target/
+/.env.poc
+
+!/.env.poc.example

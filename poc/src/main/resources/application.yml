@@ -1,0 +1,20 @@
+server:
+  error:
+    include-message: always
+spring:
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          enabled: false
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+intiva:
+  legacy: ${LEGACY_URL:http://localhost:8081}
+  agent: ${AGENT_URL:http://localhost:8082}
+  finances: ${FINANCES_URL:http://localhost:8083}
+  communications: ${COMMUNICATIONS_URL:http://localhost:8084}
+  service-key: ${INTIVA_SERVICE_KEY:}

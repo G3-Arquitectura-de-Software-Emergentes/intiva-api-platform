@@ -1,0 +1,88 @@
+package com.resolum.intiva.poc;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
+import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.amqp.core.*;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.web.server.ResponseStatusException;
+
+@EnabledIfEnvironmentVariable(named="INTIVA_TEST_DB",matches=".+")
+class PlanPersistenceTest {
+    private static final String KEY="local-test-service-secret-not-for-production";
+
+    @Test
+    void approvalPersistsOnceAndDeliveryCreatesOneNotice() throws Exception {
+        var ds=new DriverManagerDataSource(System.getenv("INTIVA_TEST_DB"),
+            System.getenv().getOrDefault("INTIVA_TEST_DB_USER","intiva_test"),
+            System.getenv().getOrDefault("INTIVA_TEST_DB_PASSWORD",""));
+        new ResourceDatabasePopulator(new ClassPathResource("agent.sql"),
+            new ClassPathResource("finances.sql"),new ClassPathResource("communications.sql")).execute(ds);
+        var db=new JdbcTemplate(ds);
+        var json=new ObjectMapper();
+        var finance=new FinancesController(db,json,KEY);
+        var legacy=mock(LegacyClient.class);
+        var model=mock(GeminiPlanner.class);
+        var owner=System.nanoTime();
+        when(legacy.owner("owner")).thenReturn(owner);
+        when(legacy.owner("other")).thenReturn(owner+1);
+        when(legacy.get("/api/v1/personal-expenses","owner")).thenReturn(json.readTree("""
+            [{"month":"2026-11","categoryId":17,"amount":580}]
+            """));
+        when(legacy.categories(owner,"owner")).thenReturn(List.of(new LegacyClient.Category(17,"Comida")));
+        when(model.propose(anyList())).thenReturn(new GeminiPlanner.Advice(17,new BigDecimal("520.00"),"Revisa el límite"));
+        var calls=new AtomicInteger();
+        var http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        http.createContext("/internal/plan-limits", exchange -> {
+            try {
+                String key=exchange.getRequestHeaders().getFirst("X-Intiva-Service-Key");
+                byte[] result;
+                if(exchange.getRequestMethod().equals("GET")) result="{}".getBytes(StandardCharsets.UTF_8);
+                else {
+                    calls.incrementAndGet();
+                    var cmd=json.readValue(exchange.getRequestBody(),PlanLimit.class);
+                    result=json.writeValueAsBytes(finance.apply(key,cmd));
+                    if(calls.get()==1) { exchange.sendResponseHeaders(503,-1);return; } // Lost confirmation after write.
+                }
+                exchange.getResponseHeaders().set("Content-Type","application/json");
+                exchange.sendResponseHeaders(200,result.length);exchange.getResponseBody().write(result);
+            } catch(Exception e){exchange.sendResponseHeaders(500,-1);}
+            finally{exchange.close();}
+        });
+        http.start();
+        try {
+            var agent=new AgentController(db,legacy,model,"http://127.0.0.1:"+http.getAddress().getPort(),KEY);
+            var draft=agent.generate("owner",new AgentController.Generate("2026-12"));
+            assertEquals("DRAFT",draft.status());
+            assertEquals(0,db.queryForObject("select count(*) from monthly_limits where owner_id=?",Integer.class,owner));
+            assertThrows(ResponseStatusException.class,()->agent.get("other",draft.id()));
+            var edited=agent.edit("owner",draft.id(),new AgentController.Update(1,new BigDecimal("510.00")));
+            assertEquals(2,edited.version());
+            assertThrows(ResponseStatusException.class,()->agent.approve("owner",draft.id(),new AgentController.Approval(1)));
+            assertEquals("FAILED",agent.approve("owner",draft.id(),new AgentController.Approval(2)).status());
+            assertEquals("ACTIVE",agent.approve("owner",draft.id(),new AgentController.Approval(2)).status());
+            assertEquals("ACTIVE",agent.approve("owner",draft.id(),new AgentController.Approval(2)).status());
+            assertEquals(2,calls.get());
+            assertEquals(1,db.queryForObject("select count(*) from monthly_limits where owner_id=?",Integer.class,owner));
+            assertEquals(new BigDecimal("510.00"),db.queryForObject("select amount from monthly_limits where owner_id=?",BigDecimal.class,owner));
+            var payload=db.queryForObject("select payload from limit_outbox where plan_id=?",String.class,draft.id());
+            var consumer=new CommunicationsController(db,json,legacy);
+            var message=MessageBuilder.withBody(payload.getBytes(StandardCharsets.UTF_8)).build();
+            consumer.consume(message);consumer.consume(message);
+            assertEquals(1,consumer.list("owner").size());
+            assertTrue(consumer.list("other").isEmpty());
+        } finally {http.stop(0);}
+    }
+}

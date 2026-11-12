@@ -1,0 +1,109 @@
+name: intiva-poc
+x-poc: &poc
+  build: ./poc
+  image: intiva-poc:local
+  restart: on-failure
+x-common: &common
+  LEGACY_URL: http://legacy:8080
+  FINANCES_URL: http://finances:8080
+  SPRING_RABBITMQ_HOST: rabbitmq
+  SPRING_RABBITMQ_USERNAME: intiva
+  SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: intiva_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
+      FINANCES_DB_PASSWORD: ${FINANCES_DB_PASSWORD:?Set FINANCES_DB_PASSWORD}
+      COMMUNICATIONS_DB_PASSWORD: ${COMMUNICATIONS_DB_PASSWORD:?Set COMMUNICATIONS_DB_PASSWORD}
+      LEGACY_DB_PASSWORD: ${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}
+    volumes:
+      - poc_pg:/var/lib/postgresql/data
+      - ./poc/init-databases.sh:/docker-entrypoint-initdb.d/10-intiva.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U intiva_admin -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:4.1
+    environment:
+      RABBITMQ_DEFAULT_USER: intiva
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+    volumes: [rabbit_data:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+  legacy:
+    build:
+      context: .
+      dockerfile: poc/Legacy.Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/intiva_platform
+      SPRING_DATASOURCE_USERNAME: legacy
+      SPRING_DATASOURCE_PASSWORD: ${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: ""
+      AUTHORIZATION_JWT_SECRET: ${LEGACY_JWT_SECRET:?Set LEGACY_JWT_SECRET}
+      INTEGRATIONS_FCM_ENABLED: "false"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+  agent:
+    <<: *poc
+    environment:
+      <<: *common
+      SPRING_PROFILES_ACTIVE: agent
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/agent_db
+      SPRING_DATASOURCE_USERNAME: agent
+      SPRING_DATASOURCE_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
+      INTIVA_SERVICE_KEY: ${INTIVA_SERVICE_KEY:?Set INTIVA_SERVICE_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+    depends_on:
+      postgres: {condition: service_healthy}
+      legacy: {condition: service_started}
+      finances: {condition: service_started}
+  finances:
+    <<: *poc
+    environment:
+      <<: *common
+      SPRING_PROFILES_ACTIVE: finances
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/finances_db
+      SPRING_DATASOURCE_USERNAME: finances
+      SPRING_DATASOURCE_PASSWORD: ${FINANCES_DB_PASSWORD:?Set FINANCES_DB_PASSWORD}
+      INTIVA_SERVICE_KEY: ${INTIVA_SERVICE_KEY:?Set INTIVA_SERVICE_KEY}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  communications:
+    <<: *poc
+    environment:
+      <<: *common
+      SPRING_PROFILES_ACTIVE: communications
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/communications_db
+      SPRING_DATASOURCE_USERNAME: communications
+      SPRING_DATASOURCE_PASSWORD: ${COMMUNICATIONS_DB_PASSWORD:?Set COMMUNICATIONS_DB_PASSWORD}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  gateway:
+    <<: *poc
+    environment:
+      SPRING_PROFILES_ACTIVE: gateway
+      LEGACY_URL: http://legacy:8080
+      AGENT_URL: http://agent:8080
+      COMMUNICATIONS_URL: http://communications:8080
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on: [agent, communications, legacy]
+volumes:
+  poc_pg:
+  rabbit_data:

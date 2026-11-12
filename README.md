@@ -52,3 +52,7 @@ The project includes basic documentation and is available in the `docs` folder. 
 
 - C4 Model Software Architecture Diagrams: includes context, container and component level diagrams to provide an overview of the system architecture and its components.
 - Class Diagrams: includes class diagrams to illustrate the structure of the codebase and the relationships between classes.
+
+## Plan mensual con IA
+
+Consulta la [guía de la PoC](poc/README.md) para levantar los servicios y probar el recorrido desde Android.
