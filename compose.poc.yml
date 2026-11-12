@@ -39,8 +39,9 @@ services:
     volumes: [rabbit_data:/var/lib/rabbitmq]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 4s
+      interval: 10s
+      timeout: 30s
+      start_period: 30s
       retries: 20
   redis:
     image: redis:7-alpine
@@ -59,6 +60,7 @@ services:
       SPRING_DATASOURCE_USERNAME: legacy
       SPRING_DATASOURCE_PASSWORD: ${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
       SPRING_DATA_REDIS_PASSWORD: ""
       AUTHORIZATION_JWT_SECRET: ${LEGACY_JWT_SECRET:?Set LEGACY_JWT_SECRET}
       INTEGRATIONS_FCM_ENABLED: "false"
@@ -125,7 +127,7 @@ services:
       LEGACY_URL: http://legacy:8080
       AGENT_URL: http://agent:8080
       COMMUNICATIONS_URL: http://communications:8080
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:${INTIVA_GATEWAY_PORT:-8080}:8080"]
     depends_on: [agent, communications, legacy]
 volumes:
   poc_pg:

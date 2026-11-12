@@ -10,6 +10,8 @@ Esta prueba ejecuta AI Agent, Finances, Savings y Communications en procesos ind
 4. En Inicio, abrir **Agente · Plan mensual**. Generar el borrador, editar el límite y, si deseas, añadir un aporte previsto y un recordatorio. Guarda los cambios y aprueba esa versión. Para probar el aporte, crea previamente una meta personal activa en PEN. Consultar el estado y el aviso: el outbox publica el evento después de la persistencia y Communications lo registra de forma asíncrona.
 5. Probar la categorización en el registro de gastos personales. Si Gemini no devuelve una categoría válida, el usuario puede continuar manualmente.
 
+Si el puerto 8080 ya está ocupado, define `INTIVA_GATEWAY_PORT=18080` en `.env.poc` y vuelve a ejecutar Compose. Compila Android con `./gradlew :app:assembleDebug -PintivaDebugGateway=http://10.0.2.2:18080/api/v1/` para usar ese puerto desde el emulador.
+
 ## Contrato
 
 Todos los endpoints del Gateway requieren el token de la sesión para acceder a datos del agente y avisos. El servidor resuelve el titular a partir del token y nunca lo toma del cuerpo de la solicitud.
