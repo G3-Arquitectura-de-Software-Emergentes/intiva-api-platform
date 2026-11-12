@@ -15,6 +15,10 @@ import java.util.Optional;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
+    List<Transaction> findByOwnerIdAndOwnerTypesAndTransactionType(Long ownerId,
+            com.resolum.intiva.platform.shared.domain.valueobjects.OwnerTypes ownerTypes,
+            TransactionTypes transactionType);
+
     /**
      * Finds a transaction list by its owner ID.
      * @param ownerId The ID of the owner of the transaction.

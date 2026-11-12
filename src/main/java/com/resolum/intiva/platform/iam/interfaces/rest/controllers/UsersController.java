@@ -45,6 +45,14 @@ public class UsersController {
         this.userQueryService = userQueryService;
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<java.util.Map<String, Long>> currentUser(java.security.Principal principal) {
+        if (principal == null) return ResponseEntity.status(401).build();
+        return userQueryService.handle(new GetUserByEmailQuery(new Email(principal.getName())))
+                .map(user -> ResponseEntity.ok(java.util.Map.of("id", user.getId())))
+                .orElseGet(() -> ResponseEntity.status(401).build());
+    }
+
     /**
      * Endpoint to retrieve a user's details by their unique identifier (ID). It accepts the user ID as a path variable and returns the corresponding user information if found.
      * @param userId The unique identifier (ID) of the user to retrieve, provided as a path variable in the URL. This ID is used to query the user information from the system.
