@@ -47,6 +47,11 @@ services:
       dockerfile: poc/Legacy.Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: dev
+      SERVER_PORT: "8080"
+      URL: ${LEGACY_PUBLIC_URL:-http://localhost:8080}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-local-demo}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-disabled}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-disabled}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/intiva_platform
       SPRING_DATASOURCE_USERNAME: legacy
       SPRING_DATASOURCE_PASSWORD: ${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}

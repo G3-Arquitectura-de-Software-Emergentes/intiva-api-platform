@@ -5,7 +5,7 @@ Esta prueba ejecuta AI Agent, Finances y Communications en procesos independient
 ## Ejecutar en local
 
 1. Copiar `.env.poc.example` a `.env.poc`. Completar las contraseñas con valores locales distintos; usar una clave interna de al menos 24 caracteres, una clave JWT compatible con IAM y una clave de Gemini. La clave de Gemini solo se configura en el servicio agent.
-2. Ejecutar `docker compose --env-file .env.poc -f compose.poc.yml up --build`. El Gateway escucha en `127.0.0.1:8080`. Los demás servicios no publican puertos.
+2. Ejecutar `docker compose --env-file .env.poc -f compose.poc.yml up --build`. El Gateway escucha en `127.0.0.1:8080`. Los demás servicios no publican puertos. El perfil local deja desactivados FCM y el uso de Cloudinary sin credenciales; la prueba utiliza correo y contraseña y avisos dentro de la app.
 3. Consultar `GET /health`. En Android, el emulador usa `http://10.0.2.2:8080/api/v1/`. Entrar con una cuenta de prueba y registrar al menos un gasto personal en PEN, con una categoría activa, en alguno de los tres meses anteriores al plan.
 4. En Inicio, abrir **Agente · Plan mensual**. Generar el borrador, guardar una edición y aprobar la versión mostrada. Consultar el estado y el aviso: el outbox publica el evento después de la persistencia y Communications lo registra de forma asíncrona.
 5. Probar la categorización en el registro de gastos personales. Si Gemini no devuelve una categoría válida, el usuario puede continuar manualmente.
