@@ -4,6 +4,7 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -36,10 +37,8 @@ public class FirebaseConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "integrations.fcm.enabled", havingValue = "true")
     FirebaseApp firebaseApp(FirebaseSettings settings) throws IOException {
-        if (!settings.enabled()) {
-            throw new IllegalStateException("FirebaseApp should not be created when FCM integration is disabled.");
-        }
 
         if (FirebaseApp.getApps().isEmpty()) {
             try (InputStream serviceAccount = resolveCredentials()) {
